@@ -1,5 +1,13 @@
 use std::{fmt::Debug, ops::Deref, string::ParseError};
 
+macro_rules! parse_many_as {
+    ($input:expr, $fpattern: expr => $ft:expr, $($pattern: expr => $t:expr,)*) => {
+        $fpattern.parse_this($input).map(|(_, rest)| ($ft, rest))
+        $(.or_else(|_| {
+            $pattern.parse_this($input).map(|(_, rest)| ($t, rest))
+        }))*
+    };
+}
 #[derive(PartialEq)]
 pub enum ParserError {
     PatternNotFound(String),
@@ -127,22 +135,22 @@ pub enum NumberOperation {
     Div,
     Pow,
     Equality,
+    NotEq,
 }
 
 impl Parse for NumberOperation {
     fn parse_from(input: &String) -> Result<(Self, String), ParserError> {
-        let (head, rest) = input.split_at(1);
-        match head {
-            "+" => Ok((NumberOperation::Add, rest.to_string())),
-            "-" => Ok((NumberOperation::Sub, rest.to_string())),
-            "*" => Ok((NumberOperation::Mul, rest.to_string())),
-            "/" => Ok((NumberOperation::Div, rest.to_string())),
-            "^" => Ok((NumberOperation::Pow, rest.to_string())),
-            "==" => Ok((NumberOperation::Equality, rest.to_string())),
-            _ => Err(ParserError::PatternNotFound(
-                "Expected operation".to_string(),
-            )),
-        }
+        parse_many_as!(
+            input,
+            '+' => NumberOperation::Add,
+            '-' => NumberOperation::Sub,
+            '*' => NumberOperation::Mul,
+            '/' => NumberOperation::Div,
+            '^' => NumberOperation::Pow,
+            "==" => NumberOperation::Equality,
+            "!=" => NumberOperation::NotEq,
+        )
+        .map_err(|_| ParserError::PatternNotFound("Could not find NumberOperation".to_string()))
     }
 }
 
@@ -178,6 +186,23 @@ impl ParseThis for String {
     fn parse_this(&self, input: &String) -> Result<(Self, String), ParserError> {
         if input.starts_with(self) {
             return Ok((self.clone(), input.get(self.len()..).unwrap().to_string()));
+        }
+
+        Err(ParserError::PatternNotFound(format!(
+            "{} did not match {}",
+            input.get(0..self.len()).unwrap(),
+            self
+        )))
+    }
+}
+
+impl ParseThis for &'static str {
+    fn parse_this(&self, input: &String) -> Result<(Self, String), ParserError> {
+        if input.starts_with(self) {
+            return Ok((
+                self,
+                input.to_string().get(self.len()..).unwrap().to_string(),
+            ));
         }
 
         Err(ParserError::PatternNotFound(format!(
@@ -268,6 +293,11 @@ mod parser_test {
         assert_eq!(
             NumberOperation::parse_from(&"+adsf".to_string()),
             Ok((NumberOperation::Add, "adsf".to_string()))
+        );
+
+        assert_eq!(
+            NumberOperation::parse_from(&"!=adsf".to_string()),
+            Ok((NumberOperation::NotEq, "adsf".to_string()))
         );
 
         assert_eq!(
