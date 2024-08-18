@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Deref, string::ParseError};
+use std::fmt::Debug;
 
 macro_rules! parse_many_as {
     ($input:expr, $fpattern: expr => $ft:expr, $($pattern: expr => $t:expr,)*) => {
@@ -8,6 +8,7 @@ macro_rules! parse_many_as {
         }))*
     };
 }
+
 #[derive(PartialEq)]
 pub enum ParserError {
     PatternNotFound(String),
@@ -31,7 +32,7 @@ where
 {
     fn parse_from(input: &String) -> Result<(Self, String), ParserError>;
 
-    fn parse_many(input: &String) -> Result<(Vec<Self>, String), ParseError> {
+    fn parse_many(input: &String) -> Result<(Vec<Self>, String), ParserError> {
         let mut v = vec![];
         let mut rest = input.clone();
         loop {
@@ -133,9 +134,9 @@ pub enum NumberOperation {
     Sub,
     Mul,
     Div,
-    Pow,
-    Equality,
-    NotEq,
+
+    Min,
+    Max,
 }
 
 impl Parse for NumberOperation {
@@ -146,12 +147,33 @@ impl Parse for NumberOperation {
             '-' => NumberOperation::Sub,
             '*' => NumberOperation::Mul,
             '/' => NumberOperation::Div,
-            '^' => NumberOperation::Pow,
-            "==" => NumberOperation::Equality,
-            "!=" => NumberOperation::NotEq,
+            "min" => NumberOperation::Min,
+            "max" => NumberOperation::Max,
         )
         .map_err(|_| ParserError::PatternNotFound("Could not find NumberOperation".to_string()))
     }
+}
+
+macro_rules! generate_from_for_number_types {
+    (integers => $($t:ty),*) => {
+        $(
+            impl From<$t> for NumberTypes {
+                fn from(value: $t) -> Self {
+                    Self::Integer(value as i64)
+                }
+            }
+        )*
+    };
+    (floating => $($t:ty),*) => {
+        $(
+            impl From<$t> for NumberTypes {
+                fn from(value: $t) -> Self {
+                    Self::Float(value as f64)
+                }
+            }
+        )*
+    };
+
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +181,9 @@ pub enum NumberTypes {
     Integer(i64),
     Float(f64),
 }
+
+generate_from_for_number_types!(floating => f32, f64);
+generate_from_for_number_types!(integers => i8, i16, i32, i64, u8, u16, u32);
 
 impl Parse for NumberTypes {
     fn parse_from(input: &String) -> Result<(Self, String), ParserError> {
@@ -293,11 +318,6 @@ mod parser_test {
         assert_eq!(
             NumberOperation::parse_from(&"+adsf".to_string()),
             Ok((NumberOperation::Add, "adsf".to_string()))
-        );
-
-        assert_eq!(
-            NumberOperation::parse_from(&"!=adsf".to_string()),
-            Ok((NumberOperation::NotEq, "adsf".to_string()))
         );
 
         assert_eq!(

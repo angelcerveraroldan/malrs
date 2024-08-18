@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 
 use parse::Parse;
 
+pub mod evaluate;
 pub mod parse;
 
 fn repl() {
@@ -15,7 +16,10 @@ fn repl() {
         buffer.clear();
         stdin.read_line(&mut buffer).unwrap();
         match parse::Expression::parse_from(&buffer) {
-            Ok((a, _)) => println!("{:?}", a),
+            Ok((a, _)) => match a {
+                parse::Expression::Bottom(n) => println!("{:?}", n),
+                parse::Expression::Node(n) => println!("{:?}", n.evaluate()),
+            },
             Err(e) => println!("{:?}", e),
         }
     }
