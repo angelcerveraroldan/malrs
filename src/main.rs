@@ -1,13 +1,17 @@
 use std::io::{Read, Write};
 
-use parse::Parse;
+use parse::float_parser;
+use parser_comb::Parser;
 
 pub mod evaluate;
 pub mod parse;
+pub mod parser_comb;
 
 fn repl() {
     let mut buffer = String::new();
     let stdin = std::io::stdin();
+
+    let parser = float_parser();
 
     println!("Welcom eto malrs v0.0.0.1. Happy coding!\n");
     loop {
@@ -15,16 +19,10 @@ fn repl() {
         let _ = std::io::stdout().flush();
         buffer.clear();
         stdin.read_line(&mut buffer).unwrap();
-        match parse::Expression::parse_from(&buffer) {
-            Ok((a, _)) => match a {
-                parse::Expression::Bottom(n) => println!("{:?}", n),
-                parse::Expression::Node(n) => println!("{:?}", n.evaluate()),
-            },
-            Err(e) => println!("{:?}", e),
-        }
+        println!("{:?}", parser.parse(&buffer))
     }
 }
 
 fn main() {
-    repl();
+    repl()
 }
