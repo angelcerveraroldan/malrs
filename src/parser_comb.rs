@@ -4,6 +4,21 @@
 *
 * */
 
+/// The ty typest must all be elements of the same enum
+#[macro_export]
+macro_rules! match_parse {
+    ( $e:expr => $t:ty ) => {
+        ParseMatch($e).with_mapping(&|_| $t)
+    };
+
+    ( $e:expr => $t:expr, $($ee:expr => $tt:expr,)* ) => {
+        ParseMatch($e).with_mapping(&|_| $t)
+            $(.otherwise( ParseMatch($ee).with_mapping(&|_| $tt) ))*
+    };
+}
+
+use std::fmt::Debug;
+
 #[derive(Debug, PartialEq)]
 pub enum ParsingError {
     PatternNotFound(String),
@@ -17,7 +32,7 @@ pub trait Parser
 where
     Self: Sized,
 {
-    type Output;
+    type Output: Debug;
 
     /// Parse the input string, if the parser is sucessful, it will return Ok((parsed, rest)),
     /// where parsed is the data that was parsed from the string, and the rest is what was left
@@ -55,7 +70,7 @@ where
     /// Make a new parser that consists of this parser OR another parser.
     ///
     /// This new parser will run both parsers in order, and return the first sucessful one
-    fn or_then<P>(self, other: P) -> OrThenParser<Self, P>
+    fn otherwise<P>(self, other: P) -> OrThenParser<Self, P>
     where
         P: Parser,
     {
@@ -91,6 +106,24 @@ where
     combinator: C,
 }
 
+impl<A, B, C> AndThenParser<A, B, C>
+where
+    A: Parser,
+    B: Parser,
+    C: AndCombinator<A::Output, B::Output>,
+{
+    pub fn combine<NC>(self, combinator: NC) -> AndThenParser<A, B, NC>
+    where
+        NC: AndCombinator<A::Output, B::Output>,
+    {
+        AndThenParser {
+            first_parse: self.first_parse,
+            second_parse: self.second_parse,
+            combinator,
+        }
+    }
+}
+
 pub trait AndCombinator<A, B> {
     type Combined;
     fn combine(&self, pair: (A, B)) -> Self::Combined;
@@ -120,6 +153,15 @@ impl<A, B> AndCombinator<A, B> for KeepSecondOutputOnly {
     type Combined = B;
     fn combine(&self, (_, b): (A, B)) -> Self::Combined {
         b
+    }
+}
+
+pub struct KeepNone;
+
+impl<A, B> AndCombinator<A, B> for KeepNone {
+    type Combined = ();
+    fn combine(&self, _: (A, B)) -> Self::Combined {
+        ()
     }
 }
 
@@ -157,6 +199,7 @@ where
     A: Parser,
     B: Parser,
     C: AndCombinator<A::Output, B::Output>,
+    C::Combined: Debug,
 {
     type Output = C::Combined;
     fn parse(&self, input: &str) -> ParserRes<Self::Output> {
@@ -192,6 +235,7 @@ impl<A, B, CommonOut> Parser for OrThenParser<A, B>
 where
     A: Parser<Output = CommonOut>,
     B: Parser<Output = CommonOut>,
+    CommonOut: Debug,
 {
     type Output = CommonOut;
     fn parse(&self, input: &str) -> ParserRes<Self::Output> {
@@ -225,6 +269,7 @@ pub struct TryMapParser<'a, P: Parser, T> {
 impl<'a, P, T> Parser for MapParser<'a, P, T>
 where
     P: Parser,
+    T: Debug,
 {
     type Output = T;
     fn parse(&self, input: &str) -> ParserRes<Self::Output> {
@@ -235,6 +280,7 @@ where
 impl<'a, P, T> Parser for TryMapParser<'a, P, T>
 where
     P: Parser,
+    T: Debug,
 {
     type Output = T;
     fn parse(&self, input: &str) -> ParserRes<Self::Output> {
@@ -243,6 +289,28 @@ where
             None => Err(ParsingError::MappingError("mapping failed".to_string())),
             Some(mapped_val) => Ok((mapped_val, rest)),
         }
+    }
+}
+
+pub struct ParseMatch<A>(pub A)
+where
+    A: Into<String>;
+
+impl<A> Parser for ParseMatch<A>
+where
+    A: Into<String> + Clone,
+{
+    type Output = String;
+    fn parse(&self, input: &str) -> ParserRes<Self::Output> {
+        let match_str: String = self.0.clone().into();
+        if !input.starts_with(&match_str) {
+            return Err(ParsingError::PatternNotFound(format!(
+                "{} did not match pattern: {}",
+                input, match_str
+            )));
+        }
+        let rest = input.chars().skip(match_str.len()).collect();
+        Ok((match_str, rest))
     }
 }
 
@@ -293,7 +361,8 @@ impl Parser for ParseWhile {
 #[cfg(test)]
 mod test_parsers {
     use super::{
-        AndCombinator, AndThenParser, IdentityAndCombinator, MapParser, ParseIf, ParseWhile, Parser,
+        AndCombinator, AndThenParser, IdentityAndCombinator, MapParser, ParseIf, ParseMatch,
+        ParseWhile, Parser,
     };
 
     #[test]
@@ -340,4 +409,35 @@ mod test_parsers {
 
     #[test]
     fn or_parse() {}
+
+    #[test]
+    fn match_parser() {
+        let p = ParseMatch("Hello!");
+
+        assert_eq!(
+            p.parse("Hello!There"),
+            Ok(("Hello!".to_string(), "There".to_string()))
+        );
+
+        assert_eq!(p.parse("  Hello!There").is_ok(), false);
+    }
+
+    #[test]
+    fn macro_match_parse() {
+        #[derive(Debug, PartialEq)]
+        enum T {
+            A,
+            B,
+            C,
+        }
+
+        let p = match_parse!(
+                "a" => T::A,
+                "b" => T::B,
+                "c" => T::C,
+        );
+
+        assert_eq!(p.parse("a  "), Ok((T::A, "  ".to_string())));
+        assert_eq!(p.parse("b  "), Ok((T::B, "  ".to_string())));
+    }
 }
